@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarcería 2</title>
+    <style>
+        /* --- ESTILOS VISUALES (PANTALLA) --- */
+        body { font-family: sans-serif; background-color: #e0f7fa; margin: 0; padding: 10px; display: flex; justify-content: center; }
+        .main-card { background: white; width: 100%; max-width: 500px; padding: 15px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border-top: 5px solid #00acc1; }
+        
+        .header { text-align: center; border-bottom: 1px dashed #ccc; padding-bottom: 10px; margin-bottom: 10px;}
+        .logo-img { width: 100px; display: block; margin: 0 auto; }
+        h1 { margin: 5px 0; color: #006064; font-size: 22px; text-transform: uppercase; }
+        
+        /* Inputs y Botones */
+        .input-group { display: flex; gap: 5px; margin-bottom: 8px; }
+        input { padding: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; width: 100%; }
+        
+        .btn { border: none; padding: 12px; border-radius: 6px; cursor: pointer; color: white; width: 100%; font-size: 16px; font-weight:bold;}
+        .btn-add { background-color: #00838f; width: auto; flex: 1; }
+        .btn-print { background-color: #2e7d32; margin-top: 15px; font-size: 18px; padding: 15px; }
+        
+        /* Tabla y Totales */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th { text-align: left; border-bottom: 2px solid #333; }
+        td { padding: 8px 2px; border-bottom: 1px dotted #ccc; }
+        .text-right { text-align: right; }
+        .totales-section { background-color: #f1f8e9; padding: 10px; border-radius: 8px; margin-top: 15px; border: 1px solid #c5e1a5; }
+        .big-total { font-size: 26px; font-weight: bold; color: #333; display: flex; justify-content: space-between; }
+        .error-msg { color: red; font-weight: bold; font-size: 12px; display: none; text-align: right; margin-top: 5px;}
+
+        /* --- ESTILOS DE IMPRESIÓN (Tu versión correcta) --- */
+        @media print {
+            @page { size: auto; margin: 0mm; }
+            body { background: white; margin: 0; padding: 0; }
+            .no-print, .status-bar, .admin-zone, .input-group, button, #panel-carga { display: none !important; }
+            
+            .main-card { display: block !important; box-shadow: none; border: none; width: 100%; max-width: 100%; padding: 5px; margin: 0; }
+            * { color: black !important; }
+            h1 { font-size: 18px; }
+            table { font-size: 12px; width: 100%; }
+            .logo-img { width: 60px; } 
+            #fecha-ticket-container { display: block !important; margin-bottom: 5px; font-size: 12px;}
+        }
+    </style>
+</head>
+<body>
+
+<div class="main-card">
+    <div class="header">
+        <img src="logo.png" alt="Logo" class="logo-img">
+        <h1>Jarcería 2</h1>
+        <div id="fecha-ticket-container"><span id="fecha-ticket">--/--/----</span></div>
+        <div style="font-family:monospace; margin-top:5px;">ID VENTA: <span id="folio-val">---</span></div>
+    </div>
+    
+    <div class="no-print">
+        <div class="input-group">
+            <input list="lista-productos" id="codigo" placeholder="🔍 Buscar..." onchange="buscarProducto()">
+            <datalist id="lista-productos"></datalist>
+        </div>
+        <div class="input-group">
+            <input type="text" id="desc" placeholder="Nombre" style="flex:2;">
+            <input type="number" id="cantidad" placeholder="#" style="flex:1;">
+            <input type="number" id="precio" placeholder="$" style="flex:1;">
+            <button class="btn btn-add" onclick="agregarProducto()">+</button>
+        </div>
+    </div>
+
+    <table>
+        <thead><tr><th>Cant</th><th>Desc</th><th class="text-right">$$</th><th class="no-print"></th></tr></thead>
+        <tbody id="tabla-productos"></tbody>
+    </table>
+
+    <div class="totales-section">
+        <div class="big-total"><span>TOTAL:</span><span>$<span id="total-pagar">0.00</span></span></div>
+        
+        <div class="no-print" style="margin-top:10px;">
+            <label style="margin-right:15px;"><input type="radio" name="pago" value="efectivo" checked onclick="togglePago()"> Efec</label>
+            <label><input type="radio" name="pago" value="tarjeta" onclick="togglePago()"> Tarj</label>
+            
+            <input type="number" id="paga-con" placeholder="Recibido $" oninput="calcCambio()" style="text-align:right; margin-top:5px;">
+            <div id="msg-error" class="error-msg">⚠️ FALTAN $<span id="falta-dinero">0.00</span></div>
+        </div>
+        
+        <div style="display:flex; justify-content:space-between; margin-top:5px; font-weight:bold;">
+            <span>Cambio:</span><span>$<span id="cambio">0.00</span></span>
+        </div>
+    </div>
+
+    <div class="no-print"><button class="btn btn-print" onclick="finalizarVenta()">✅ COBRAR</button></div>
+</div>
+
+<script>
+    const URL_SCRIPT = "https://script.google.com/macros/s/AKfycbwyZYEnDiy0JisGCm592fpyzX0XYsiE5c2X9YSj2wKw0s1a7e-c2HedtA-MzBBUR9TQow/exec";
+    const TIPO_TIENDA = "jarceria2"; 
+    
+    let baseDeDatos = {}; 
+    let total = 0; 
+    let carritoNombres = []; 
+
+    window.addEventListener('load', function() {
+        generarNuevoID(); 
+        if(navigator.onLine) {
+            fetch(URL_SCRIPT + "?tipo=" + TIPO_TIENDA) 
+            .then(r => r.json()).then(d => { baseDeDatos = d; llenarLista(); });
+        }
+    });
+
+    function generarNuevoID() {
+        const d = new Date();
+        const id = "J2-" + d.getFullYear().toString().substr(-2) + 
+                   (d.getMonth()+1).toString().padStart(2,'0') + 
+                   d.getDate().toString().padStart(2,'0') + '-' + 
+                   d.getHours().toString().padStart(2,'0') + 
+                   d.getMinutes().toString().padStart(2,'0') + 
+                   d.getSeconds().toString().padStart(2,'0');
+                   
+        let folioEl = document.getElementById('folio-val');
+        let fechaEl = document.getElementById('fecha-ticket');
+        if(folioEl) folioEl.innerText = id;
+        if(fechaEl) fechaEl.innerText = d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+        return id;
+    }
+
+    // --- FUNCIÓN PRINCIPAL DE COBRO ---
+    function finalizarVenta() {
+        // 1. Validar carrito vacío
+        if(total <= 0) { alert("Agrega productos primero"); return; }
+        
+        // 2. VALIDAR DINERO INSUFICIENTE (EL CANDADO QUE FALTABA)
+        let esEfectivo = document.querySelector('input[name="pago"]:checked').value === 'efectivo';
+        let pagoRecibido = parseFloat(document.getElementById('paga-con').value) || 0;
+
+        if (esEfectivo && pagoRecibido < total) {
+            alert("❌ Error: El pago es menor al total.");
+            document.getElementById('paga-con').focus();
+            return; // DETIENE EL PROCESO AQUÍ
+        }
+
+        // 3. Preparar Datos
+        let d = new Date();
+        document.getElementById('fecha-ticket').innerText = d.toLocaleDateString() + ' ' + d.toLocaleTimeString(); // Hora exacta
+        
+        let idActual = document.getElementById('folio-val').innerText;
+        if(idActual === "---" || idActual === "") idActual = generarNuevoID();
+
+        let ventaObj = {
+            tienda: TIPO_TIENDA, 
+            fecha: d.toLocaleDateString(),
+            hora: d.toLocaleTimeString(),
+            id_unico: idActual,
+            total: total,
+            metodo: esEfectivo ? 'EFECTIVO' : 'TARJETA',
+            detalle: carritoNombres.join(", ")
+        };
+
+        // 4. Imprimir y Guardar (Turbo)
+        requestAnimationFrame(() => {
+            window.print();
+            
+            setTimeout(() => {
+                if(navigator.onLine) {
+                    fetch(URL_SCRIPT, {method:'POST', mode:'no-cors', headers:{'Content-Type':'application/json'}, body:JSON.stringify(ventaObj)});
+                }
+                
+                if(confirm("¿Venta finalizada correctamente?")) {
+                    limpiar();
+                }
+            }, 500);
+        });
+    }
+    
+    // --- LÓGICA DE INTERFAZ ---
+    function agregarProducto() {
+        let d=document.getElementById('desc').value;
+        let c=parseFloat(document.getElementById('cantidad').value);
+        let p=parseFloat(document.getElementById('precio').value);
+        
+        if(!d||!c||!p) return;
+        
+        let s=c*p; 
+        total+=s; 
+        carritoNombres.push(`(${c}) ${d}`);
+        
+        document.getElementById('tabla-productos').innerHTML += 
+            `<tr>
+                <td>${c}</td>
+                <td>${d}</td>
+                <td class="text-right">$${s.toFixed(2)}</td>
+                <td class="no-print"><button style="color:red;border:none;background:none;font-size:18px;cursor:pointer;" onclick="borrar(this,${s})">×</button></td>
+            </tr>`;
+        updateTotal(); 
+        limpiarInputs();
+    }
+
+    function borrar(b,v){ b.closest('tr').remove(); total-=v; updateTotal(); }
+    
+    function updateTotal(){ 
+        document.getElementById('total-pagar').innerText=total.toFixed(2); 
+        togglePago(); // Revisa si falta dinero cada vez que cambia el total
+    }
+    
+    function limpiarInputs(){ 
+        document.getElementById('codigo').value=""; document.getElementById('desc').value=""; 
+        document.getElementById('cantidad').value=""; document.getElementById('precio').value=""; 
+        document.getElementById('codigo').focus(); 
+    }
+    
+    function limpiar(){ 
+        total=0; carritoNombres=[]; 
+        document.getElementById('tabla-productos').innerHTML=""; 
+        updateTotal(); 
+        document.getElementById('paga-con').value=""; 
+        document.getElementById('msg-error').style.display="none"; // Ocultar error
+        generarNuevoID(); 
+    }
+    
+    function llenarLista() { 
+        let dl = document.getElementById('lista-productos'); 
+        dl.innerHTML = ""; 
+        for (let k in baseDeDatos) { 
+            let op = document.createElement('option'); 
+            // 🌟 CAMBIO AQUÍ: Ahora el valor principal de búsqueda es el NOMBRE
+            op.value = baseDeDatos[k].nombre; 
+            dl.appendChild(op); 
+        } 
+    }
+
+    function buscarProducto() { 
+        let textoBuscado = document.getElementById('codigo').value; 
+        
+        // 🌟 CAMBIO AQUÍ: Recorremos la base de datos buscando coincidencias por nombre
+        for (let k in baseDeDatos) {
+            if (baseDeDatos[k].nombre === textoBuscado) {
+                document.getElementById('desc').value = baseDeDatos[k].nombre; 
+                document.getElementById('precio').value = baseDeDatos[k].precio; 
+                document.getElementById('cantidad').value = 1; 
+                document.getElementById('cantidad').focus(); // Pasa el cursor a la cantidad automáticamente
+                return; // Detenemos la búsqueda porque ya lo encontró
+            }
+        }
+    }
+    
+    function togglePago(){ 
+        let esEfectivo = document.querySelector('input[name="pago"]:checked').value === 'efectivo';
+        let inputPago = document.getElementById('paga-con');
+        
+        if(!esEfectivo){ 
+            inputPago.value = total.toFixed(2); 
+            inputPago.disabled = true; 
+            document.getElementById('cambio').innerText = "0.00";
+            document.getElementById('msg-error').style.display = "none";
+        } else { 
+            inputPago.disabled = false; 
+            calcCambio(); 
+        }
+    }
+    
+    function calcCambio(){ 
+        let pagado = parseFloat(document.getElementById('paga-con').value)||0; 
+        let diferencia = pagado - total;
+        
+        if(diferencia >= 0) {
+            document.getElementById('cambio').innerText = diferencia.toFixed(2);
+            document.getElementById('msg-error').style.display = "none";
+        } else {
+            document.getElementById('cambio').innerText = "0.00";
+            // Mostrar cuánto falta
+            document.getElementById('falta-dinero').innerText = Math.abs(diferencia).toFixed(2);
+            document.getElementById('msg-error').style.display = (total > 0) ? "block" : "none";
+        }
+    }
+</script>
+</body>
+</html>
